@@ -37,7 +37,7 @@ Config.AnnSize = 40
 -- The length of time in ms between each alarm sound loop.
 -- It is recommended that you do not edit this unless you change the
 -- alarm sound file. Time starts from start of audio file, not end
-Config.AlarmLength = 500
+Config.AlarmLength = 9000
 -- The length of time in ms between each sounder sound loop.
 -- It is recommended that you do not edit this unless you change the
 -- sounder sound file. Time starts from start of audio file, not end
@@ -98,6 +98,131 @@ AddEventHandler("onClientResourceStart", function (ResourceName)
 	end
 end)
 
+function triggerButton()
+	if not FireAlarm.Active then
+		-- Loop though all call points
+		for _, CallPoint in ipairs(FireAlarm.CallPoints) do
+			-- If this call point is not already been pulled
+			if not CallPoint.Pulled then
+				-- Player position
+				local PP = GetEntityCoords(PlayerPedId(), false)
+				-- Call point position
+				local CP = vector3(CallPoint.x, CallPoint.y, CallPoint.z)
+				-- Distance between player and call point
+				local Distance = Vdist(PP.x, PP.y, PP.z, CP.x, CP.y, CP.z)
+				-- If player is very close to call point
+				if Distance <= 1.5 then
+					-- Set point to pulled to avoid setting twice
+					CallPoint.Pulled = true
+
+					-- If animation dictionary not loaded
+					if not HasAnimDictLoaded("anim@mp_radio@low_apment") then
+						-- Load animation Dictionary
+						RequestAnimDict("anim@mp_radio@low_apment")
+						-- While the dictionary is not loaded
+						while not HasAnimDictLoaded("anim@mp_radio@low_apment") do
+							-- Wait
+							Citizen.Wait(0)
+						end
+					end
+
+					-- Player Ped
+					local PlayerPed = PlayerPedId()
+					-- Fire panel connect to call point
+					local Panel = FirePanel.ControlPanels[CallPoint.Control]
+					-- Make player face the panel
+					TaskTurnPedToFaceCoord(PlayerPed, CallPoint.x, CallPoint.y, CallPoint.z, 0)
+					-- Allow time to face call point
+					Citizen.Wait(500)
+					-- Player call point interaction animation
+					TaskPlayAnim(PlayerPed, "anim@mp_radio@low_apment", "button_press_kitchen", 8.0, -8, 0.01, 49, 0, 0, 0, 0)
+					-- Allow time to press button
+					Citizen.Wait(500)
+					-- Stop call point animation
+					StopAnimTask(PlayerPed, "anim@mp_radio@low_apment", "button_press_kitchen", 1.0)
+					-- Send call point to server
+					TriggerServerEvent("Fire-Alarm:SetPulled", CallPoint)
+					-- If pager intergation enabled
+					if Config.EnablePager then
+						-- Get nearest street and cross street to control panel
+						local Street, CrossStreet = GetStreetNameAtCoord(Panel.x, Panel.y, Panel.z)
+						-- Initialise details array
+						local DetailsArray = {}
+						-- Initialise details variable
+						local Details
+						-- If there is a cross street
+						if CrossStreet ~= 0 then
+							-- Set details
+							Details = "Box Alarm - " .. GetStreetNameFromHashKey(Street) .. " X " .. GetStreetNameFromHashKey(CrossStreet)
+						-- If there is not cross street
+						else
+							-- Set details
+							Details = "Box Alarm - " .. GetStreetNameFromHashKey(Street)
+						end
+						-- Turn each word in the details variable into an array entry
+						for w in Details:gmatch("%S+") do table.insert(DetailsArray, w) end
+						-- If the panel has tones predefined
+						if Panel.AlarmTones then
+							-- Send message to pager resource
+							TriggerServerEvent("Fire-EMS-Pager:PageTones", Panel.AlarmTones, true, DetailsArray)
+						-- If panel does not have predefined tones
+						else
+							-- Send message to pager resource
+							TriggerServerEvent("Fire-EMS-Pager:PageTones", Config.DefaultAlarmTones, true, DetailsArray)
+						end
+					end
+				end
+			end
+		end
+	-- If alarm is active
+	elseif FireAlarm.Active then
+		-- Loop though all control points
+		for _, Panel in ipairs(FirePanel.ControlPanels) do
+			-- If alarm is active, and active ID equals call point ID
+			if FireAlarm.ActiveID == Panel.ID then
+				-- Player position
+				local PP = GetEntityCoords(PlayerPedId(), false)
+				-- Control panel position
+				local CPP = vector3(Panel.x, Panel.y, Panel.z)
+				-- Distance between player and panel
+				local Distance = Vdist(PP.x, PP.y, PP.z, CPP.x, CPP.y, CPP.z) + 0.01 -- Stops divide by 0 errors
+				-- If distance between player and panel is within range
+				if (Distance <= FireAlarm.Size) then
+					-- Set Alarm volume
+					local AlarmVolume = (1 - (Distance / FireAlarm.Size))
+					-- If player is in a vehicle
+					if IsPedInAnyVehicle(PlayerPedId(), false) then
+						-- Get player vehicle class
+						local VC = GetVehicleClass(GetVehiclePedIsIn(PlayerPedId()), false)
+						-- If vehicle is not a motobike or a bicycle
+						if VC ~= 8 or VC ~= 13 then
+							-- Lower the alarm volume by 45%
+							AlarmVolume = AlarmVolume * 0.45
+						end
+					end
+
+					-- New NUI message
+					SendNUIMessage({
+						-- Tell NUI to set alarm volume
+						PayloadType	= "SetAlarmVolume",
+						-- Volume value
+						Payload 	= AlarmVolume
+					})
+				-- If player is outside of range
+				else
+					-- New NUI message
+					SendNUIMessage({
+						-- Tell NUI to set alarm volume
+						PayloadType	= "SetAlarmVolume",
+						-- Volume value
+						Payload		= 0
+					})
+				end
+			end
+		end
+	end
+end
+
 -- Return of objects
 RegisterNetEvent("Fire-Alarm:Return:GetObjects")
 AddEventHandler("Fire-Alarm:Return:GetObjects", function(Objects)
@@ -111,6 +236,21 @@ AddEventHandler("Fire-Alarm:Return:GetObjects", function(Objects)
 		if Object.Prop ~= nil then
 			-- Attempt to create a new object
 			local NewObject = CreateObjectNoOffset(GetHashKey(Object.Prop), vector3(Object.x, Object.y, Object.z), false, false, false)
+
+			exports.ox_target:addBoxZone({
+				coords = vector3(Object.x, Object.y, Object.z),
+				size = vec3(2, 2, 2),
+				rotation = 45,
+				options = {
+					name = "handmelder",
+					label = "Handmelder auslösen",
+					icon = "fas fa-fire",
+					distance = 1.5,
+					onSelect = function()
+						triggerButton()
+					end
+				}
+			})
 
 			-- If able to create object
 			if NewObject then
@@ -706,84 +846,7 @@ Citizen.CreateThread(function()
 		-- Stops crashes
 		Citizen.Wait(0)
 
-		-- If alarm not active and E just pressed
-		if not FireAlarm.Active and IsControlJustReleased(0, 38) then
-			-- Loop though all call points
-			for _, CallPoint in ipairs(FireAlarm.CallPoints) do
-				-- If this call point is not already been pulled
-				if not CallPoint.Pulled then
-					-- Player position
-					local PP = GetEntityCoords(PlayerPedId(), false)
-					-- Call point position
-					local CP = vector3(CallPoint.x, CallPoint.y, CallPoint.z)
-					-- Distance between player and call point
-					local Distance = Vdist(PP.x, PP.y, PP.z, CP.x, CP.y, CP.z)
-					-- If player is very close to call point
-					if Distance <= 1.5 then
-						-- Set point to pulled to avoid setting twice
-						CallPoint.Pulled = true
-
-						-- If animation dictionary not loaded
-						if not HasAnimDictLoaded("anim@mp_radio@low_apment") then
-							-- Load animation Dictionary
-							RequestAnimDict("anim@mp_radio@low_apment")
-							-- While the dictionary is not loaded
-							while not HasAnimDictLoaded("anim@mp_radio@low_apment") do
-								-- Wait
-								Citizen.Wait(0)
-							end
-						end
-
-						-- Player Ped
-						local PlayerPed = PlayerPedId()
-						-- Fire panel connect to call point
-						local Panel = FirePanel.ControlPanels[CallPoint.Control]
-						-- Make player face the panel
-						TaskTurnPedToFaceCoord(PlayerPed, CallPoint.x, CallPoint.y, CallPoint.z, 0)
-						-- Allow time to face call point
-						Citizen.Wait(500)
-						-- Player call point interaction animation
-						TaskPlayAnim(PlayerPed, "anim@mp_radio@low_apment", "button_press_kitchen", 8.0, -8, 0.01, 49, 0, 0, 0, 0)
-						-- Allow time to press button
-						Citizen.Wait(500)
-						-- Stop call point animation
-						StopAnimTask(PlayerPed, "anim@mp_radio@low_apment", "button_press_kitchen", 1.0)
-						-- Send call point to server
-						TriggerServerEvent("Fire-Alarm:SetPulled", CallPoint)
-						-- If pager intergation enabled
-						if Config.EnablePager then
-							-- Get nearest street and cross street to control panel
-							local Street, CrossStreet = GetStreetNameAtCoord(Panel.x, Panel.y, Panel.z)
-							-- Initialise details array
-							local DetailsArray = {}
-							-- Initialise details variable
-							local Details
-							-- If there is a cross street
-							if CrossStreet ~= 0 then
-								-- Set details
-								Details = "Box Alarm - " .. GetStreetNameFromHashKey(Street) .. " X " .. GetStreetNameFromHashKey(CrossStreet)
-							-- If there is not cross street
-							else
-								-- Set details
-								Details = "Box Alarm - " .. GetStreetNameFromHashKey(Street)
-							end
-							-- Turn each word in the details variable into an array entry
-							for w in Details:gmatch("%S+") do table.insert(DetailsArray, w) end
-							-- If the panel has tones predefined
-							if Panel.AlarmTones then
-								-- Send message to pager resource
-								TriggerServerEvent("Fire-EMS-Pager:PageTones", Panel.AlarmTones, true, DetailsArray)
-							-- If panel does not have predefined tones
-							else
-								-- Send message to pager resource
-								TriggerServerEvent("Fire-EMS-Pager:PageTones", Config.DefaultAlarmTones, true, DetailsArray)
-							end
-						end
-					end
-				end
-			end
-		-- If alarm is active
-		elseif FireAlarm.Active then
+		if FireAlarm.Active then
 			-- Loop though all control points
 			for _, Panel in ipairs(FirePanel.ControlPanels) do
 				-- If alarm is active, and active ID equals call point ID
