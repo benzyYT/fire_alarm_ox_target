@@ -227,3 +227,11 @@ AddEventHandler("Fire-Panel:Ann", function(Ann, Panel)
 	-- Bounce to all clients
 	TriggerClientEvent("Fire-Panel:Return:Ann", -1, Ann, Server.ControlPanels[Panel])
 end)
+
+RegisterNetEvent("Fire-Alarm:TriggerEmergencyDispatch")
+AddEventHandler("Fire-Alarm:TriggerEmergencyDispatch", function(CallPoint)
+	local PanelCoords = vector3(Server.ControlPanels[CallPoint.Control].x, Server.ControlPanels[CallPoint.Control].y, Server.ControlPanels[CallPoint.Control].z)
+	local PanelName = Server.ControlPanels[CallPoint.Control].Name or "Unbekannt"
+
+	TriggerEvent('emergencydispatch:emergencycall:new', "fire", "Melder " .. CallPoint.ID .. " der Brandmeldeanlage " .. PanelName .. " ausgelöst" , PanelCoords, true)
+end)

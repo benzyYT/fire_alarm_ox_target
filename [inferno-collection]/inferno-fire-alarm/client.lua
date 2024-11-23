@@ -18,7 +18,7 @@
 local Config = {} -- Do not edit this line
 -- Whether or not to enable Fire/EMS Pager Intergration
 -- Requires https://github.com/inferno-collection/Fire-EMS-Pager
-Config.EnablePager = true
+Config.EnablePager = false
 -- Assuming pager intergration enabled, which tones should be paged when
 -- alarm activated, if none are defined in the JSON file entry
 Config.DefaultAlarmTones = {"fire"}
@@ -143,34 +143,7 @@ function triggerButton()
 					-- Send call point to server
 					TriggerServerEvent("Fire-Alarm:SetPulled", CallPoint)
 					-- If pager intergation enabled
-					if Config.EnablePager then
-						-- Get nearest street and cross street to control panel
-						local Street, CrossStreet = GetStreetNameAtCoord(Panel.x, Panel.y, Panel.z)
-						-- Initialise details array
-						local DetailsArray = {}
-						-- Initialise details variable
-						local Details
-						-- If there is a cross street
-						if CrossStreet ~= 0 then
-							-- Set details
-							Details = "Box Alarm - " .. GetStreetNameFromHashKey(Street) .. " X " .. GetStreetNameFromHashKey(CrossStreet)
-						-- If there is not cross street
-						else
-							-- Set details
-							Details = "Box Alarm - " .. GetStreetNameFromHashKey(Street)
-						end
-						-- Turn each word in the details variable into an array entry
-						for w in Details:gmatch("%S+") do table.insert(DetailsArray, w) end
-						-- If the panel has tones predefined
-						if Panel.AlarmTones then
-							-- Send message to pager resource
-							TriggerServerEvent("Fire-EMS-Pager:PageTones", Panel.AlarmTones, true, DetailsArray)
-						-- If panel does not have predefined tones
-						else
-							-- Send message to pager resource
-							TriggerServerEvent("Fire-EMS-Pager:PageTones", Config.DefaultAlarmTones, true, DetailsArray)
-						end
-					end
+					TriggerServerEvent("Fire-Alarm:TriggerEmergencyDispatch", CallPoint)
 				end
 			end
 		end
